@@ -3,23 +3,22 @@
     .version = "0.1.0",
     .fingerprint = 0xaa1a0327439646c3,
 
-    .minimum_zig_version = "0.16.0-dev",
+    .minimum_zig_version = "0.16.0-dev.3039+b490412cd",
 
     .dependencies = .{
-        .c_kzg = .{
+        .c_kzg_upstream = .{
             .url = "https://github.com/ethereum/c-kzg-4844/archive/refs/tags/v2.1.7.tar.gz",
-            .hash = "N-V-__8AAC2EyQXftVkDsVfsCXLNeRCtQwOR3RrBmt0-uVfN",
+            .hash = "N-V-__8AAPWKyQVMbzcquevyc_YgjOmdT5ZU9z30RSsRlGLd",
         },
-        .blst = .{
-            .url = "https://github.com/supranational/blst/archive/refs/tags/v0.3.15.tar.gz",
-            .hash = "N-V-__8AAKDMOgDp0ule4-ieF6xoW2euEGpOwOyBPo-KRj_a",
+        .blst_zig = .{
+            .url = "git+https://github.com/lodekeeper-z/blst.zig.git#254f2869b9c72b7f70900b41ec90213807c7a675",
+            .hash = "blst_zig-0.0.0-cnAxzg4LAACIXTmj0X4unkf0FCYcFTZVzDdWE32PZl_A",
         },
     },
 
     .paths = .{
         "build.zig",
         "build.zig.zon",
-        "src",
         "test",
         "README.md",
     },

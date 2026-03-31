@@ -1,23 +1,36 @@
 # c-kzg-zig
 
-Zig build wrapper and bindings for [c-kzg-4844](https://github.com/ethereum/c-kzg-4844) — the C implementation of KZG commitments for EIP-4844 (blob transactions).
+Zig build packaging for [c-kzg-4844](https://github.com/ethereum/c-kzg-4844).
 
-Structured similarly to [ChainSafe/blst.zig](https://github.com/ChainSafe/blst.zig).
+This package exports:
 
-## Features
+- the `c_kzg` C library artifact
+- the c-kzg public headers, installed on that artifact
+- `trusted_setup.txt` as a named lazy path
 
-- Compiles c-kzg-4844 C sources and blst entirely via the Zig build system — no external toolchain required
-- Zig-idiomatic API wrapping all EIP-4844 and EIP-7594 (PeerDAS) operations
-- Error union return types mapping C error codes to Zig errors
-- Tested against the c-kzg-4844 trusted setup
+This package does not export a handwritten Zig wrapper module. Consumers are expected to add their own wrapper, and to add `blst.zig` separately for final linking.
 
 ## Requirements
 
-- Zig 0.16.0-dev (zig-master)
+- Zig 0.16.0-dev
+
+## Public Surface
+
+From a dependency handle:
+
+- `dep.artifact("c_kzg")`
+- `dep.namedLazyPath("trusted_setup")`
+
+The `c_kzg` artifact installs:
+
+- the full c-kzg public header tree
+- `blst.h` and related installed headers forwarded from `blst.zig`
+
+That means a consumer wrapper module can `@cImport("ckzg.h")` after linking against `dep.artifact("c_kzg")`.
 
 ## Usage
 
-Add to your `build.zig.zon`:
+Add dependencies to `build.zig.zon`:
 
 ```zon
 .dependencies = .{
@@ -25,106 +38,69 @@ Add to your `build.zig.zon`:
         .url = "https://github.com/ChainSafe/c-kzg-zig/archive/refs/tags/v0.1.0.tar.gz",
         .hash = "<hash>",
     },
+    .blst = .{
+        .url = "git+https://github.com/lodekeeper-z/blst.zig.git#254f2869b9c72b7f70900b41ec90213807c7a675",
+        .hash = "blst_zig-0.0.0-cnAxzg4LAACIXTmj0X4unkf0FCYcFTZVzDdWE32PZl_A",
+    },
 },
 ```
+
+That `blst` ref is the head commit of [ChainSafe/blst.zig PR #4](https://github.com/ChainSafe/blst.zig/pull/4), which contains the Zig 0.16 build updates.
 
 In `build.zig`:
 
 ```zig
-const c_kzg_dep = b.dependency("c_kzg", .{ .target = target, .optimize = optimize });
-const c_kzg_mod = c_kzg_dep.module("c_kzg");
-exe.root_module.addImport("c_kzg", c_kzg_mod);
+const c_kzg_dep = b.dependency("c_kzg", .{
+    .target = target,
+    .optimize = optimize,
+});
+const blst_dep = b.dependency("blst", .{
+    .target = target,
+    .optimize = optimize,
+});
+
+const kzg_wrapper = b.addModule("kzg_wrapper", .{
+    .root_source_file = b.path("src/kzg_wrapper.zig"),
+    .target = target,
+    .optimize = optimize,
+});
+kzg_wrapper.linkLibrary(c_kzg_dep.artifact("c_kzg"));
+
+exe.root_module.addImport("kzg_wrapper", kzg_wrapper);
+exe.root_module.linkLibrary(blst_dep.artifact("blst"));
+
+const install_setup = b.addInstallFile(
+    c_kzg_dep.namedLazyPath("trusted_setup"),
+    "trusted_setup.txt",
+);
+b.getInstallStep().dependOn(&install_setup.step);
 ```
 
-Then in your Zig code:
+In your wrapper module:
 
 ```zig
-const kzg = @import("c_kzg");
-
-// Load trusted setup
-const settings = try kzg.loadTrustedSetupFile(allocator, "trusted_setup.txt");
-defer kzg.freeTrustedSetup(allocator, settings);
-
-// Compute commitment
-var blob: kzg.Blob = [_]u8{0} ** kzg.BYTES_PER_BLOB;
-const commitment = try kzg.blobToKzgCommitment(&blob, settings);
-
-// Compute and verify proof
-const proof = try kzg.computeBlobKzgProof(&blob, &commitment, settings);
-const ok = try kzg.verifyBlobKzgProof(&blob, &commitment, &proof, settings);
+pub const c = @cImport({
+    @cInclude("ckzg.h");
+});
 ```
 
-## API
-
-### Constants
-
-| Name | Value | Description |
-|------|-------|-------------|
-| `FIELD_ELEMENTS_PER_BLOB` | 4096 | Field elements per blob |
-| `BYTES_PER_FIELD_ELEMENT` | 32 | Bytes per field element |
-| `BYTES_PER_BLOB` | 131072 | Total blob size (4096 × 32) |
-| `BYTES_PER_COMMITMENT` | 48 | KZG commitment size |
-| `BYTES_PER_PROOF` | 48 | KZG proof size |
-| `CELLS_PER_EXT_BLOB` | 128 | Cells in extended blob (EIP-7594) |
-
-### EIP-4844 Functions
-
-```zig
-// Setup
-fn loadTrustedSetupFile(allocator, path: []const u8) !*KzgSettings
-fn loadTrustedSetup(allocator, g1_monomial, g1_lagrange, g2_monomial) !*KzgSettings
-fn freeTrustedSetup(allocator, settings: *KzgSettings) void
-
-// Blob operations
-fn blobToKzgCommitment(blob: *const Blob, settings: *const KzgSettings) !KzgCommitment
-fn computeKzgProof(blob, z: *const Bytes32, settings) !struct{ proof: KzgProof, y: Bytes32 }
-fn computeBlobKzgProof(blob, commitment: *const KzgCommitment, settings) !KzgProof
-
-// Verification
-fn verifyKzgProof(commitment, z, y, proof, settings) !bool
-fn verifyBlobKzgProof(blob, commitment, proof, settings) !bool
-fn verifyBlobKzgProofBatch(blobs, commitments, proofs, settings) !bool
-```
-
-### EIP-7594 / PeerDAS Functions
-
-```zig
-fn computeCellsAndKzgProofs(blob, settings) !struct{ cells, proofs }
-fn recoverCellsAndKzgProofs(cell_indices, cells, settings) !struct{ cells, proofs }
-fn verifyCellKzgProofBatch(allocator, commitments_per_cell, cell_indices, cells, proofs, settings) !bool
-```
-
-### Errors
-
-```zig
-const KzgError = error{
-    InvalidArgument,   // C_KZG_BADARGS
-    KzgInternalError,  // C_KZG_ERROR
-    OutOfMemory,       // C_KZG_MALLOC
-};
-```
+If you want to embed the trusted setup instead of installing it as a runtime file, use `dep.namedLazyPath("trusted_setup")` as the source of that build step.
 
 ## Build Options
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `-Dportable` | false | Use portable blst (disable platform asm) |
+| `-Dportable` | false | Passed through to the package's build-time `blst.zig` dependency |
 | `-Dfield_elements_per_blob` | 4096 | Override for non-mainnet |
 
-## Running Tests
+## Tests
 
-Integration tests require the c-kzg-4844 trusted setup file:
+`zig build test` runs compile-time and C-API smoke tests. Integration tests are enabled when `C_KZG_TRUSTED_SETUP_PATH` is set:
 
 ```bash
-# Run compile-only tests (no setup file needed)
-zig build test
-
-# Run all tests including integration tests
 C_KZG_TRUSTED_SETUP_PATH=/path/to/trusted_setup.txt zig build test
 ```
 
-The trusted setup file is available in the [c-kzg-4844 repository](https://github.com/ethereum/c-kzg-4844/blob/main/src/trusted_setup.txt).
-
 ## License
 
-Apache 2.0 — same as c-kzg-4844.
+Apache 2.0.

@@ -4,74 +4,24 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    const portable = b.option(bool, "portable", "use portable blst (no platform-specific asm)") orelse false;
-
     const field_elements_per_blob = b.option(
         u32,
         "field_elements_per_blob",
         "Number of field elements per blob (default: 4096 for mainnet)",
     ) orelse 4096;
 
-    const c_kzg_dep = b.dependency("c_kzg", .{});
-    const blst_dep = b.dependency("blst", .{});
+    const portable = b.option(bool, "portable", "use portable blst (passed through to blst.zig)") orelse false;
 
-    // -------------------------------------------------------------------------
-    // Build blst static library
-    // -------------------------------------------------------------------------
-    const blst_common_flags = &[_][]const u8{
-        "-fno-builtin",
-        "-Wno-unused-function",
-        "-Wno-unused-command-line-argument",
-    };
-    const blst_avx_flag = &[_][]const u8{"-mno-avx"};
-
-    const blst_mod = b.createModule(.{
+    const c_kzg_dep = b.dependency("c_kzg_upstream", .{});
+    const blst_dep = b.dependency("blst_zig", .{
         .target = target,
         .optimize = optimize,
-        .link_libc = true,
+        .portable = portable,
     });
-
-    if (portable) {
-        blst_mod.addCMacro("__BLST_PORTABLE__", "");
-    } else {
-        if (std.Target.x86.featureSetHas(target.result.cpu.features, .adx)) {
-            blst_mod.addCMacro("__ADX__", "");
-        }
-    }
-
-    if (target.result.cpu.arch == .aarch64) {
-        blst_mod.addCMacro("__ARM_FEATURE_CRYPTO", "1");
-    }
-
-    if (target.result.cpu.arch != .x86_64 and
-        target.result.cpu.arch != .aarch64)
-    {
-        blst_mod.addCMacro("__BLST_NO_ASM__", "");
-    }
-
-    const blst_flags = if (target.result.cpu.arch == .x86_64)
-        blst_common_flags ++ blst_avx_flag
-    else
-        blst_common_flags;
-
-    blst_mod.addCSourceFiles(.{
-        .root = blst_dep.path(""),
-        .files = &.{
-            "src/server.c",
-            "build/assembly.S",
-        },
-        .flags = blst_flags,
-    });
-    blst_mod.addIncludePath(blst_dep.path("bindings"));
-
-    const blst_lib = b.addLibrary(.{
-        .name = "blst",
-        .root_module = blst_mod,
-    });
-    b.installArtifact(blst_lib);
+    const blst_lib = blst_dep.artifact("blst");
 
     // -------------------------------------------------------------------------
-    // Build c-kzg-4844 static library (links against blst)
+    // Build c-kzg-4844 static library
     // -------------------------------------------------------------------------
     const field_elem_define = b.fmt("-DFIELD_ELEMENTS_PER_BLOB={d}", .{field_elements_per_blob});
 
@@ -92,28 +42,28 @@ pub fn build(b: *std.Build) void {
     });
 
     // c-kzg-4844 includes headers relative to its src/ directory;
-    // blst.h must be found via blst/bindings.
+    // blst.h is surfaced by blst.zig via its installed header tree.
     c_kzg_mod.addIncludePath(c_kzg_dep.path("src"));
-    c_kzg_mod.addIncludePath(blst_dep.path("bindings"));
-    c_kzg_mod.linkLibrary(blst_lib);
+    c_kzg_mod.addIncludePath(blst_lib.getEmittedIncludeTree());
 
     const c_kzg_lib = b.addLibrary(.{
         .name = "c_kzg",
         .root_module = c_kzg_mod,
     });
+    c_kzg_lib.installHeader(c_kzg_dep.path("src/ckzg.h"), "ckzg.h");
+    c_kzg_lib.installHeadersDirectory(c_kzg_dep.path("src/common"), "common", .{});
+    c_kzg_lib.installHeadersDirectory(c_kzg_dep.path("src/eip4844"), "eip4844", .{});
+    c_kzg_lib.installHeadersDirectory(c_kzg_dep.path("src/eip7594"), "eip7594", .{});
+    c_kzg_lib.installHeadersDirectory(c_kzg_dep.path("src/setup"), "setup", .{});
+    c_kzg_lib.installLibraryHeaders(blst_lib);
     b.installArtifact(c_kzg_lib);
 
     // -------------------------------------------------------------------------
-    // Zig bindings module
+    // Trusted setup data
     // -------------------------------------------------------------------------
-    const bindings_mod = b.addModule("c_kzg", .{
-        .root_source_file = b.path("src/root.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-    bindings_mod.addIncludePath(c_kzg_dep.path("src"));
-    bindings_mod.addIncludePath(blst_dep.path("bindings"));
-    bindings_mod.linkLibrary(c_kzg_lib);
+    const trusted_setup = c_kzg_dep.path("src/trusted_setup.txt");
+    b.addNamedLazyPath("trusted_setup", trusted_setup);
+    b.getInstallStep().dependOn(&b.addInstallFile(trusted_setup, "trusted_setup.txt").step);
 
     // -------------------------------------------------------------------------
     // Tests
@@ -122,11 +72,9 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("test/c_kzg_test.zig"),
         .target = target,
         .optimize = optimize,
-        .imports = &.{
-            .{ .name = "c_kzg", .module = bindings_mod },
-        },
     });
     test_mod.linkLibrary(c_kzg_lib);
+    test_mod.linkLibrary(blst_lib);
 
     const tests = b.addTest(.{
         .root_module = test_mod,
