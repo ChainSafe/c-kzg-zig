@@ -6,9 +6,10 @@ This package exports:
 
 - the `c_kzg` C library artifact
 - the c-kzg public headers, installed on that artifact
+- a `trusted_setup` Zig module with decoded byte slices for `load_trusted_setup`
 - `trusted_setup.txt` as a named lazy path
 
-This package does not export a handwritten Zig wrapper module. Consumers are expected to add their own wrapper, and to add `blst.zig` separately for final linking.
+This package does not export a full handwritten Zig wrapper over the C API. Consumers are still expected to add their own wrapper, and to add `blst.zig` separately for final linking.
 
 ## Requirements
 
@@ -19,6 +20,7 @@ This package does not export a handwritten Zig wrapper module. Consumers are exp
 From a dependency handle:
 
 - `dep.artifact("c_kzg")`
+- `dep.module("trusted_setup")`
 - `dep.namedLazyPath("trusted_setup")`
 
 The `c_kzg` artifact installs:
@@ -66,6 +68,7 @@ const kzg_wrapper = b.addModule("kzg_wrapper", .{
 });
 kzg_wrapper.linkLibrary(c_kzg_dep.artifact("c_kzg"));
 
+exe.root_module.addImport("trusted_setup", c_kzg_dep.module("trusted_setup"));
 exe.root_module.addImport("kzg_wrapper", kzg_wrapper);
 exe.root_module.linkLibrary(blst_dep.artifact("blst"));
 
@@ -84,7 +87,27 @@ pub const c = @cImport({
 });
 ```
 
-If you want to embed the trusted setup instead of installing it as a runtime file, use `dep.namedLazyPath("trusted_setup")` as the source of that build step.
+The exported `trusted_setup` module contains the decoded buffers expected by `load_trusted_setup`:
+
+```zig
+const c = @import("kzg_wrapper").c;
+const trusted_setup = @import("trusted_setup");
+
+var settings: c.KZGSettings = undefined;
+try expectOk(c.load_trusted_setup(
+    &settings,
+    trusted_setup.g1_monomial_bytes.ptr,
+    trusted_setup.g1_monomial_bytes.len,
+    trusted_setup.g1_lagrange_bytes.ptr,
+    trusted_setup.g1_lagrange_bytes.len,
+    trusted_setup.g2_monomial_bytes.ptr,
+    trusted_setup.g2_monomial_bytes.len,
+    0,
+));
+defer c.free_trusted_setup(&settings);
+```
+
+If you want the original upstream text file at runtime instead, keep using `dep.namedLazyPath("trusted_setup")`.
 
 ## Build Options
 
@@ -95,11 +118,7 @@ If you want to embed the trusted setup instead of installing it as a runtime fil
 
 ## Tests
 
-`zig build test` runs compile-time and C-API smoke tests. Integration tests are enabled when `C_KZG_TRUSTED_SETUP_PATH` is set:
-
-```bash
-C_KZG_TRUSTED_SETUP_PATH=/path/to/trusted_setup.txt zig build test
-```
+`zig build test` runs compile-time and C-API smoke tests against the exported embedded trusted setup module.
 
 ## License
 

@@ -2,26 +2,24 @@ const std = @import("std");
 const c = @cImport({
     @cInclude("ckzg.h");
 });
-
-fn trustedSetupPath() ?[]const u8 {
-    const val = std.c.getenv("C_KZG_TRUSTED_SETUP_PATH") orelse return null;
-    return std.mem.span(val);
-}
+const trusted_setup = @import("trusted_setup");
 
 fn expectOk(ret: c.C_KZG_RET) !void {
     try std.testing.expectEqual(@as(c.C_KZG_RET, c.C_KZG_OK), ret);
 }
 
-fn loadSetup(allocator: std.mem.Allocator) !?c.KZGSettings {
-    const path = trustedSetupPath() orelse return null;
-    const path_z = try allocator.dupeZ(u8, path);
-    defer allocator.free(path_z);
-
-    const file = c.fopen(path_z.ptr, "r") orelse return error.FileOpenFailed;
-    defer _ = c.fclose(file);
-
+fn loadEmbeddedSetup() !c.KZGSettings {
     var settings: c.KZGSettings = undefined;
-    try expectOk(c.load_trusted_setup_file(&settings, file, 0));
+    try expectOk(c.load_trusted_setup(
+        &settings,
+        trusted_setup.g1_monomial_bytes.ptr,
+        trusted_setup.g1_monomial_bytes.len,
+        trusted_setup.g1_lagrange_bytes.ptr,
+        trusted_setup.g1_lagrange_bytes.len,
+        trusted_setup.g2_monomial_bytes.ptr,
+        trusted_setup.g2_monomial_bytes.len,
+        0,
+    ));
     return settings;
 }
 
@@ -38,14 +36,12 @@ test "constants" {
 }
 
 test "load trusted setup" {
-    const allocator = std.testing.allocator;
-    var settings = try loadSetup(allocator) orelse return;
+    var settings = try loadEmbeddedSetup();
     defer c.free_trusted_setup(&settings);
 }
 
 test "blob to commitment" {
-    const allocator = std.testing.allocator;
-    var settings = try loadSetup(allocator) orelse return;
+    var settings = try loadEmbeddedSetup();
     defer c.free_trusted_setup(&settings);
 
     var blob = std.mem.zeroes(c.Blob);
@@ -55,8 +51,7 @@ test "blob to commitment" {
 }
 
 test "compute and verify blob kzg proof" {
-    const allocator = std.testing.allocator;
-    var settings = try loadSetup(allocator) orelse return;
+    var settings = try loadEmbeddedSetup();
     defer c.free_trusted_setup(&settings);
 
     var blob = std.mem.zeroes(c.Blob);
@@ -71,8 +66,7 @@ test "compute and verify blob kzg proof" {
 }
 
 test "batch verify blob kzg proofs" {
-    const allocator = std.testing.allocator;
-    var settings = try loadSetup(allocator) orelse return;
+    var settings = try loadEmbeddedSetup();
     defer c.free_trusted_setup(&settings);
 
     var blob = std.mem.zeroes(c.Blob);
@@ -99,8 +93,7 @@ test "batch verify blob kzg proofs" {
 }
 
 test "compute cells and kzg proofs" {
-    const allocator = std.testing.allocator;
-    var settings = try loadSetup(allocator) orelse return;
+    var settings = try loadEmbeddedSetup();
     defer c.free_trusted_setup(&settings);
 
     const cell_count: usize = @intCast(c.CELLS_PER_EXT_BLOB);
@@ -112,8 +105,7 @@ test "compute cells and kzg proofs" {
 }
 
 test "recover cells and kzg proofs" {
-    const allocator = std.testing.allocator;
-    var settings = try loadSetup(allocator) orelse return;
+    var settings = try loadEmbeddedSetup();
     defer c.free_trusted_setup(&settings);
 
     const cell_count: usize = @intCast(c.CELLS_PER_EXT_BLOB);
@@ -150,8 +142,7 @@ test "recover cells and kzg proofs" {
 }
 
 test "verify cell kzg proof batch" {
-    const allocator = std.testing.allocator;
-    var settings = try loadSetup(allocator) orelse return;
+    var settings = try loadEmbeddedSetup();
     defer c.free_trusted_setup(&settings);
 
     const n = 4;
