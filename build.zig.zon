@@ -8,7 +8,7 @@
     .dependencies = .{
         .c_kzg_upstream = .{
             .url = "https://github.com/ethereum/c-kzg-4844/archive/refs/tags/v2.1.7.tar.gz",
-            .hash = "N-V-__8AAPWKyQVMbzcquevyc_YgjOmdT5ZU9z30RSsRlGLd",
+            .hash = "N-V-__8AAC2EyQXftVkDsVfsCXLNeRCtQwOR3RrBmt0-uVfN",
         },
         .blst_zig = .{
             .url = "git+https://github.com/lodekeeper-z/blst.zig.git#254f2869b9c72b7f70900b41ec90213807c7a675",
