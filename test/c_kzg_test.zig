@@ -1,7 +1,6 @@
 const std = @import("std");
-const c = @cImport({
-    @cInclude("ckzg.h");
-});
+const c = @import("c_kzg");
+const blst = @import("blst");
 const trusted_setup = @import("trusted_setup");
 
 fn expectOk(ret: c.C_KZG_RET) !void {
@@ -33,6 +32,13 @@ test "constants" {
     try std.testing.expectEqual(@as(usize, 2048), @as(usize, @intCast(c.BYTES_PER_CELL)));
     try std.testing.expectEqual(@as(usize, 64), @as(usize, @intCast(c.CELLS_PER_BLOB)));
     try std.testing.expectEqual(@as(usize, 128), @as(usize, @intCast(c.CELLS_PER_EXT_BLOB)));
+}
+
+test "blst module matches c_kzg ABI types" {
+    try std.testing.expectEqual(@sizeOf(c.g1_t), @sizeOf(blst.blst_p1));
+    try std.testing.expectEqual(@alignOf(c.g1_t), @alignOf(blst.blst_p1));
+    try std.testing.expectEqual(@sizeOf(c.g2_t), @sizeOf(blst.blst_p2));
+    try std.testing.expectEqual(@alignOf(c.g2_t), @alignOf(blst.blst_p2));
 }
 
 test "load trusted setup" {

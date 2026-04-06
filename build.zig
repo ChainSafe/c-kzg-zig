@@ -56,6 +56,7 @@ pub fn build(b: *std.Build) void {
     // blst.h is surfaced by blst.zig via its installed header tree.
     c_kzg_mod.addIncludePath(c_kzg_dep.path("src"));
     c_kzg_mod.addIncludePath(blst_lib.getEmittedIncludeTree());
+    c_kzg_mod.linkLibrary(blst_lib);
 
     const c_kzg_lib = b.addLibrary(.{
         .name = "c_kzg",
@@ -68,6 +69,31 @@ pub fn build(b: *std.Build) void {
     c_kzg_lib.installHeadersDirectory(c_kzg_dep.path("src/setup"), "setup", .{});
     c_kzg_lib.installLibraryHeaders(blst_lib);
     b.installArtifact(c_kzg_lib);
+
+    const c_kzg_translate = b.addTranslateC(.{
+        .root_source_file = c_kzg_dep.path("src/ckzg.h"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    c_kzg_translate.addIncludePath(c_kzg_dep.path("src"));
+    c_kzg_translate.addIncludePath(blst_lib.getEmittedIncludeTree());
+
+    const c_kzg_abi_mod = c_kzg_translate.addModule("c_kzg");
+    c_kzg_abi_mod.linkLibrary(c_kzg_lib);
+
+    const translate_headers = b.addWriteFiles();
+    const blst_translate_root = translate_headers.add("blst_root.h", "#include \"blst.h\"\n");
+    const blst_translate = b.addTranslateC(.{
+        .root_source_file = blst_translate_root,
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    blst_translate.addIncludePath(blst_lib.getEmittedIncludeTree());
+
+    const blst_abi_mod = blst_translate.addModule("blst");
+    blst_abi_mod.linkLibrary(blst_lib);
 
     // -------------------------------------------------------------------------
     // Trusted setup data
@@ -85,8 +111,8 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
-    test_mod.linkLibrary(c_kzg_lib);
-    test_mod.linkLibrary(blst_lib);
+    test_mod.addImport("c_kzg", c_kzg_abi_mod);
+    test_mod.addImport("blst", blst_abi_mod);
     test_mod.addImport("trusted_setup", trusted_setup_mod);
 
     const tests = b.addTest(.{
