@@ -78,6 +78,9 @@ pub fn build(b: *std.Build) void {
     });
     c_kzg_translate.addIncludePath(c_kzg_dep.path("src"));
     c_kzg_translate.addIncludePath(blst_lib.getEmittedIncludeTree());
+    // glibc's fortified stdio wrappers expand builtins that Zig translate-c
+    // does not currently model under optimized builds.
+    c_kzg_translate.defineCMacro("_FORTIFY_SOURCE", "0");
 
     const c_kzg_abi_mod = c_kzg_translate.addModule("c_kzg");
     c_kzg_abi_mod.linkLibrary(c_kzg_lib);
